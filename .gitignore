@@ -1,0 +1,20 @@
+# IntelliJ IDEA
+/.idea
+*.iml
+*.iws
+/out/
+# Maven
+/target/
+# Logs
+*.log
+# Environment variables
+.env
+# Compiled class files
+*.class
+# Package Files
+*.jar
+*.war
+*.ear
+# Generated files
+/.mvn/timing.properties
+```
