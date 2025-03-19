@@ -66,8 +66,7 @@ public class Crawler {
 
     private Properties loadConfig() {
         Properties props = new Properties();
-        try (InputStream input = getClass().getClassLoader()
-                .getResourceAsStream("config.properties")) {
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream("config.properties")) {
             if (input == null) {
                 System.out.println("Unable to find config.properties");
                 return props;
@@ -105,8 +104,6 @@ public class Crawler {
             }
         }
 
-        flushBulkData();
-
         System.out.println("\nCrawling completed!");
         System.out.println("Total URLs visited: " + visitedUrl.size());
     }
@@ -115,101 +112,56 @@ public class Crawler {
      * Process a single URL: fetch, parse, extract links and queue them
      */
     private void processUrl(String url, int depth) {
-        if (visitedUrl.contains(url) || isBlockedDomain(url) || depth > MAX_DEPTH) {
+
+        if (visitedUrl.contains(url) || isBlockedDomain(url) || depth > MAX_DEPTH || url.contains("#")) {
             return;
         }
 
         visitedUrl.add(url);
 
+        boolean skipIndexing = false;
+        // Check if URL already exists in Elasticsearch
+        try {
+            skipIndexing = service.documentExists(INDEX_DB, url);
+            if (skipIndexing) {
+                System.out.println("URL already indexed: " + url + " (skipping content indexing)");
+            }
+        } catch (IOException e) {
+            System.err.println("Error checking URL in database: " + e.getMessage());
+            // Continue processing if we can't check the database
+        }
+
         try {
             // Fetch and parse the page
-            Document doc = Jsoup.connect(url)
-                    .timeout(TIMEOUT_MS)
-                    .get();
+            Document doc = Jsoup.connect(url).timeout(TIMEOUT_MS).get();
 
             System.out.println("Depth: " + depth + " [" + url + "]");
-            System.out.println("ana hnaya");
-            List<List<Double>> db = GenerateEmbeddings.getEmbeddings("nomic-embed-text", doc.text());
-            System.out.println(db);
-            System.out.println("ANA HNA");
-            SiteData siteData = new SiteData(url, doc.title(), doc.text(), db);
-            System.out.println("DZT hnaya");
 
-            try {
-                // Convert to map and add to bulk collection
-                Map<String, Object> dataMap = ObjectToMapConverter.convertToMap(siteData);
-
-                synchronized (bulkData) {
-                    bulkData.add(dataMap);
-                    bulkUrls.add(url);
-
-                    // If we've reached the bulk size threshold, send the batch
-                    if (bulkData.size() >= BULK_SIZE) {
-                        flushBulkData();
-                    }
+            // Only store the data if it's not already in the database
+            if (!skipIndexing) {
+                SiteData siteData = new SiteData(url, doc.title(), doc.text(), GenerateEmbeddings.getEmbeddings("nomic-embed-text", doc.text()));
+                try {
+                    // Convert to map and store data
+                    Map<String, Object> dataMap = ObjectToMapConverter.convertToMap(siteData);
+                    service.storeData(siteData.getUrl(), INDEX_DB, dataMap);
+                } catch (JsonProcessingException e) {
+                    System.err.println("Failed to convert data for URL " + url + ": " + e.getMessage());
                 }
-            } catch (JsonProcessingException e) {
-                System.err.println("Failed to convert data for URL " + url + ": " + e.getMessage());
             }
 
-            // Extract all links from the page
+            // Extract all links from the page - do this regardless of whether we indexed the content
             Elements links = doc.select("a[href]");
 
             // Queue links for processing
             for (Element link : links) {
                 String nextUrl = link.attr("abs:href");
-                if (!nextUrl.isEmpty() && !visitedUrl.contains(nextUrl) && !isBlockedDomain(nextUrl)) {
+                if (!nextUrl.isEmpty() && !visitedUrl.contains(nextUrl) && !isBlockedDomain(nextUrl) && !nextUrl.contains("#")) {
                     queue.add(new CrawlTask(nextUrl, depth + 1));
                 }
             }
 
         } catch (IOException e) {
             System.err.println("Error crawling " + url + ": " + e.getMessage());
-        }
-    }
-
-    /**
-     * Send accumulated data to Elasticsearch
-     */
-    private void flushBulkData() {
-        synchronized (bulkData) {
-            if (bulkData.isEmpty()) {
-                return;
-            }
-
-            try {
-                service.storeBulkData(bulkUrls, INDEX_DB, bulkData);
-                System.out.println("Bulk indexed " + bulkData.size() + " documents");
-            } catch (IOException e) {
-                System.err.println("Failed to bulk index: " + e.getMessage());
-                // Fall back to individual indexing if bulk fails
-                fallbackToIndividualIndexing();
-            }
-
-            bulkData.clear();
-            bulkUrls.clear();
-        }
-    }
-
-    /**
-     * Fallback method if bulk indexing fails
-     */
-    private void fallbackToIndividualIndexing() {
-        System.out.println("Falling back to individual document indexing...");
-
-        for (int i = 0; i < bulkUrls.size(); i++) {
-            try {
-                service.storeData(bulkUrls.get(i), INDEX_DB, bulkData.get(i));
-            } catch (IOException e) {
-                System.err.println("Failed to index document for URL " + bulkUrls.get(i) + ": " + e.getMessage());
-            }
-
-            // Add a small delay between requests
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
         }
     }
 
@@ -236,9 +188,4 @@ public class Crawler {
         this.service = service;
     }
 
-
-    public static void main(String[] args) throws IOException {
-        Crawler crawler = new Crawler("https://example.com");
-        crawler.crawl();
-    }
 }

@@ -105,10 +105,18 @@ public class ElasticsearchService {
                     .index(index)
                     .id(id)
             );
+            System.out.println(response.toString());
         } catch (Exception e) {
             System.err.println("Error deleting document with ID " + id + ": " + e.getMessage());
             throw e;
         }
+    }
+
+    public boolean documentExists(String index, String id) throws IOException {
+        return client.exists(e -> e
+                .index(index)
+                .id(id)
+        ).value();
     }
 
     public void printAllIds(String index) throws IOException {

@@ -12,7 +12,12 @@ public class EmbeddingStorageTest {
 
     public static void main(String[] args) throws IOException {
         EmbeddingStorageTest testRunner = new EmbeddingStorageTest();
-        testRunner.testEmbeddingsGenerationAndStorage();
+//        testRunner.testEmbeddingsGenerationAndStorage();
+        ElasticsearchService service = new ElasticsearchService();
+        service.deleteData("my_index","#" );
+        service.deleteData("my_index","https://geeksblabla.community/#projects" );
+        service.deleteData("my_index","https://geeksblabla.community#footer" );
+        service.deleteData("my_index","https://geeksblabla.community/about#team" );
     }
 
     void testEmbeddingsGenerationAndStorage() throws IOException {
