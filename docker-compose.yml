@@ -6,8 +6,8 @@ services:
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false # Disable security for easy setup
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m" # Adjust memory usage
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
       - "9200:9200"
       - "9300:9300"
@@ -26,7 +26,6 @@ services:
     networks:
       - elk
 
-#  /ollama:/root/.ollama -p 11434:11434 ollama/ollama
   ollama:
     image: ollama/ollama
     container_name: ollama
@@ -36,6 +35,14 @@ services:
       - "11434:11434"
     networks:
       - elk
+    entrypoint: >
+      sh -c "
+        ollama serve & 
+        sleep 10 &&
+        ollama pull nomic-embed-text &&
+        ollama pull all-minilm &&
+        tail -f /dev/null
+      "
 
 networks:
   elk:

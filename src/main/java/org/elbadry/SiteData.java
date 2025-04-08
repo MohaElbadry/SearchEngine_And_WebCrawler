@@ -6,9 +6,9 @@ public class SiteData {
     String url;
     String title;
     String ScrapedData;
-    List<List<Double>> embedding; // 🔹 Add embeddings list
+    List<Double> embedding; // Changed from List<List<Double>> to List<Double>
 
-    public SiteData(String url, String title, String DATA, List<List<Double>> embedding) {
+    public SiteData(String url, String title, String DATA, List<Double> embedding) {
         this.url = url;
         this.title = title;
         this.ScrapedData = DATA;
@@ -27,8 +27,7 @@ public class SiteData {
         return title;
     }
 
-    public List<List<Double>> getEmbedding() {
+    public List<Double> getEmbedding() {
         return embedding;
     }
-
 }

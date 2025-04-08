@@ -24,12 +24,11 @@ public class SemanticSearchService {
     }
 
     public Map<String, Double> semanticSearch(String query, String index) throws IOException {
-        // Generate query embedding
-        List<List<Double>> queryEmbedding = GenerateEmbeddings.getEmbeddings("nomic-embed-text", query);
-        if (queryEmbedding.isEmpty()) {
+        // Generate query embedding - updated to work with flattened embeddings
+        List<Double> qEmbed = GenerateEmbeddings.getEmbeddings("nomic-embed-text", query);
+        if (qEmbed.isEmpty()) {
             return Collections.emptyMap();
         }
-        List<Double> qEmbed = queryEmbedding.get(0);
 
         try {
             // First attempt: Use script_score query for more efficient vector search
@@ -41,6 +40,10 @@ public class SemanticSearchService {
         }
     }
 
+
+
+    // In SemanticSearchService.java, update the script score query:
+
     private Map<String, Double> performScriptScoreSearch(List<Double> qEmbed, String index) throws IOException {
         SearchResponse<Map> response = client.search(s -> s
                         .index(index)
@@ -49,7 +52,7 @@ public class SemanticSearchService {
                                 .scriptScore(ss -> ss
                                         .query(sq -> sq.matchAll(m -> m))
                                         .script(sc -> sc
-                                                .source("cosineSimilarity(params.query_vector, doc['embedding.0']) + 1.0")
+                                                .source("cosineSimilarity(params.query_vector, 'embedding') + 1.0")
                                                 .params("query_vector", JsonData.of(qEmbed)))
                                 )
                         ),
@@ -66,6 +69,7 @@ public class SemanticSearchService {
         return results;
     }
 
+    // And update the client-side search to handle flat embeddings:
     private Map<String, Double> performClientSideSearch(List<Double> qEmbed, String index) throws IOException {
         // Get documents from Elasticsearch with a higher limit but not ridiculous
         SearchResponse<Map> response = client.search(s -> s
@@ -81,9 +85,9 @@ public class SemanticSearchService {
             if (source != null && source.containsKey("embedding")) {
                 try {
                     @SuppressWarnings("unchecked")
-                    List<List<Double>> docEmbedding = (List<List<Double>>) source.get("embedding");
-                    if (!docEmbedding.isEmpty()) {
-                        double score = cosineSimilarity(qEmbed, docEmbedding.get(0));
+                    List<Double> docEmbedding = (List<Double>) source.get("embedding");
+                    if (docEmbedding != null && !docEmbedding.isEmpty()) {
+                        double score = cosineSimilarity(qEmbed, docEmbedding);
                         if (score >= MIN_SCORE_THRESHOLD) {
                             scoredResults.put(hit.id(), score);
                         }

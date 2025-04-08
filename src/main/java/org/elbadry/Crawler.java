@@ -2,6 +2,7 @@ package org.elbadry;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import org.db.ElasticsearchService;
+import org.db.IndexManager;
 import org.embeding.GenerateEmbeddings;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -20,11 +21,13 @@ public class Crawler {
     private final Set<String> blockedDomains;
     private final String baseUrl;
     private ElasticsearchService service;
+    private final IndexManager indexManager;
     private final String INDEX_DB;
     private final List<Map<String, Object>> bulkData;
     private final List<String> bulkUrls;
     private final int BULK_SIZE = 3;
     private final int TIMEOUT_MS = 10000; // 10 seconds
+    private static final int EMBEDDING_DIMENSION = 768; // Standard dimension for many embedding models
 
     private static class CrawlTask {
         final String url;
@@ -36,7 +39,6 @@ public class Crawler {
         }
     }
 
-
     public Crawler() {
         Properties props = loadConfig();
         this.visitedUrl = new HashSet<>();
@@ -46,6 +48,7 @@ public class Crawler {
         this.baseUrl = props.getProperty("base_url");
         this.INDEX_DB = props.getProperty("index_db");
         this.service = new ElasticsearchService();
+        this.indexManager = new IndexManager();
         this.bulkData = new ArrayList<>();
         this.bulkUrls = new ArrayList<>();
     }
@@ -59,12 +62,13 @@ public class Crawler {
         this.baseUrl = baseUrl;
         this.INDEX_DB = props.getProperty("index_db");
         this.service = new ElasticsearchService();
+        this.indexManager = new IndexManager();
         this.bulkData = new ArrayList<>();
         this.bulkUrls = new ArrayList<>();
     }
 
-
     private Properties loadConfig() {
+        // Unchanged
         Properties props = new Properties();
         try (InputStream input = getClass().getClassLoader().getResourceAsStream("config.properties")) {
             if (input == null) {
@@ -78,19 +82,35 @@ public class Crawler {
         return props;
     }
 
-
     public void crawl() throws IOException {
+        // Ensure index exists with proper mapping before starting
+        ensureIndexExists();
         startCrawling(baseUrl);
     }
 
     public void crawl(String startUrl) throws IOException {
+        // Ensure index exists with proper mapping before starting
+        ensureIndexExists();
         startCrawling(startUrl);
+    }
+
+
+    private void ensureIndexExists() throws IOException {
+        try {
+            if (!indexManager.indexExists(INDEX_DB)) {
+                indexManager.createIndex(INDEX_DB, EMBEDDING_DIMENSION);
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to create or check index: " + e.getMessage());
+            throw e; // Re-throw as this is critical
+        }
     }
 
     /**
      * Start crawling process using a queue-based approach instead of recursion
      */
     private void startCrawling(String startUrl) throws IOException {
+        // Unchanged
         queue.add(new CrawlTask(startUrl, 0));
 
         while (!queue.isEmpty()) {
@@ -112,7 +132,7 @@ public class Crawler {
      * Process a single URL: fetch, parse, extract links and queue them
      */
     private void processUrl(String url, int depth) {
-
+        // Updated to handle the new embedding format
         if (visitedUrl.contains(url) || isBlockedDomain(url) || depth > MAX_DEPTH || url.contains("#")) {
             return;
         }
@@ -139,7 +159,14 @@ public class Crawler {
 
             // Only store the data if it's not already in the database
             if (!skipIndexing) {
-                SiteData siteData = new SiteData(url, doc.title(), doc.text(), GenerateEmbeddings.getEmbeddings("nomic-embed-text", doc.text()));
+                // Get the embedding as a single vector
+                List<Double> embedding = GenerateEmbeddings.getEmbeddings("nomic-embed-text", doc.text());
+                if (embedding.isEmpty()) {
+                    System.err.println("Warning: Could not generate embedding for " + url);
+                    // Continue processing anyway
+                }
+
+                SiteData siteData = new SiteData(url, doc.title(), doc.text(), embedding);
                 try {
                     // Convert to map and store data
                     Map<String, Object> dataMap = ObjectToMapConverter.convertToMap(siteData);
@@ -165,16 +192,11 @@ public class Crawler {
         }
     }
 
-    /**
-     * Check if URL is from a blocked domain
-     */
+    // Rest of methods unchanged
     private boolean isBlockedDomain(String url) {
         return blockedDomains.stream().anyMatch(url.toLowerCase()::contains);
     }
 
-    /**
-     * Print all visited URLs
-     */
     public void printVisitedUrls() {
         System.out.println("\nVisited URLs:");
         visitedUrl.forEach(System.out::println);
@@ -187,5 +209,4 @@ public class Crawler {
     public void setService(ElasticsearchService service) {
         this.service = service;
     }
-
 }

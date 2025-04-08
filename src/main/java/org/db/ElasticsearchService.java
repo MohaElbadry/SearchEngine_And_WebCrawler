@@ -1,12 +1,18 @@
 package org.db;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch.core.*;
+import co.elastic.clients.elasticsearch.core.BulkResponse;
+import co.elastic.clients.elasticsearch.core.DeleteResponse;
+import co.elastic.clients.elasticsearch.core.IndexResponse;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
+import co.elastic.clients.elasticsearch.core.ScrollResponse;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class ElasticsearchService {
     private final ElasticsearchClient client;
@@ -31,12 +37,11 @@ public class ElasticsearchService {
 
     public void storeBulkData(List<String> urls, String index, List<Map<String, Object>> dataList) throws IOException {
         if (urls.size() != dataList.size()) {
-            throw new IllegalArgumentException("URLs and data lists must be the same size");
+            throw new IllegalArgumentException("URLs and dataList must be the same size");
         }
 
         var bulkRequest = new co.elastic.clients.elasticsearch.core.BulkRequest.Builder();
 
-        // Add bulk operations
         for (int i = 0; i < urls.size(); i++) {
             int finalI = i;
             bulkRequest.operations(op -> op.index(idx -> idx
@@ -45,29 +50,26 @@ public class ElasticsearchService {
                     .document(dataList.get(finalI))));
         }
 
-        // Retry logic with exponential backoff
-        int retries = 0, MAX_RETRIES = 3;
+        int retries = 0;
+        final int MAX_RETRIES = 3;
         long RETRY_DELAY_MS = 1000;
 
         while (retries < MAX_RETRIES) {
-
             try {
                 BulkResponse response = client.bulk(bulkRequest.build());
-
-                // Check for errors
                 if (response.errors()) {
                     response.items().stream()
                             .filter(item -> item.error() != null)
                             .forEach(item -> System.err.println("Error for ID " + item.id() + ": " + item.error().reason()));
                 }
-                return; // Exit if successful
+                return;
             } catch (Exception e) {
                 System.err.println("Elasticsearch bulk request failed (attempt " + (retries + 1) + "): " + e.getMessage());
                 if (++retries == MAX_RETRIES) {
                     throw new IOException("Failed to index documents after " + MAX_RETRIES + " retries", e);
                 }
                 try {
-                    Thread.sleep(RETRY_DELAY_MS * (1L << (retries - 1))); // Exponential backoff
+                    Thread.sleep(RETRY_DELAY_MS * (1L << (retries - 1)));
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new IOException("Interrupted during retry backoff", ie);
@@ -76,18 +78,67 @@ public class ElasticsearchService {
         }
     }
 
+    public List<String> getIDsScroll(String index) throws IOException {
+        List<String> ids = new ArrayList<>();
+
+        // Initial search with scroll parameter
+        SearchResponse<Map> searchResponse = client.search(s -> s
+                        .index(index)
+                        .size(1000)
+                        .scroll(sc -> sc.time("1m"))
+                        .query(q -> q.matchAll(m -> m)),
+                Map.class);
+
+        // Add initial batch of hits
+        ids.addAll(searchResponse.hits().hits().stream()
+                .map(Hit::id)
+                .collect(Collectors.toList()));
+
+        // Continue scrolling while we have a scroll ID and hits
+        String initialScrollId = searchResponse.scrollId();
+        while (initialScrollId != null && !searchResponse.hits().hits().isEmpty()) {
+            // Use a final variable in lambda to avoid "Variable must be final" error
+            final String currentScrollId = initialScrollId;
+
+            // Execute scroll request
+            ScrollResponse<Map> scrollResponse = client.scroll(s -> s
+                            .scrollId(currentScrollId)
+                            .scroll(sc -> sc.time("1m")),
+                    Map.class);
+
+            // Update scroll ID for next iteration
+            initialScrollId = scrollResponse.scrollId();
+
+            // Add this batch of hits
+            ids.addAll(scrollResponse.hits().hits().stream()
+                    .map(Hit::id)
+                    .collect(Collectors.toList()));
+
+            // Break if we have no more hits
+            if (scrollResponse.hits().hits().isEmpty()) {
+                break;
+            }
+        }
+
+        // Clear the scroll to free resources
+        if (initialScrollId != null) {
+            String finalInitialScrollId = initialScrollId;
+            client.clearScroll(c -> c.scrollId(finalInitialScrollId));
+        }
+
+        return ids;
+    }
+
     public List<String> getIDs(String index) throws IOException {
+        // Ideally use pagination or scroll API. For smaller datasets, size(10000) may suffice.
         SearchResponse<Map> response = client.search(s -> s
                         .index(index)
-                        .size(10000)  // Maximum size in one request
+                        .size(10000)
                         .query(q -> q.matchAll(m -> m)),
                 Map.class
         );
-
-        return response.hits().hits().stream().map(Hit::id).toList();
+        return response.hits().hits().stream().map(Hit::id).collect(Collectors.toList());
     }
-
-
 
     public void deleteListe(String index, String idPrefix) throws IOException {
         List<String> ids = getIDs(index);
@@ -120,16 +171,9 @@ public class ElasticsearchService {
     }
 
     public void printAllIds(String index) throws IOException {
-        SearchResponse<Map> response = client.search(s -> s
-                        .index(index)
-                        .size(10000)  // Maximum size in one request
-                        .query(q -> q.matchAll(m -> m)),
-                Map.class
-        );
+        List<String> ids = getIDsScroll(index);
         System.out.println("Document IDs in index " + index + ":");
-        for (Hit<Map> hit : response.hits().hits()) {
-            System.out.println(hit.id());
-        }
-        System.out.println("Total documents: " + response.hits().total().value());
+        ids.forEach(System.out::println);
+        System.out.println("Total documents: " + ids.size());
     }
 }

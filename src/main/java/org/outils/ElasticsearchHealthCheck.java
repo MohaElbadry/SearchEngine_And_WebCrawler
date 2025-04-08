@@ -14,12 +14,10 @@ public class ElasticsearchHealthCheck {
 
     public static void elasticsearchHealthCheck() {
         if (!isPortOpen()) restartElasticsearch();
-        else System.out.println("✅ Elasticsearch is up and running.");
     }
 
     public static boolean isPortOpen() {
         try (Socket socket = new Socket(HOST, PORT)) {
-            System.out.println("✅ Port " + PORT + " is open.");
             return true;
         } catch (IOException e) {
             System.out.println("❌ Port " + PORT + " is closed or Elasticsearch is down.");
