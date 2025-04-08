@@ -1,4 +1,4 @@
-# SearchEngine: Built From Scratch
+# SearchEngine And WebCrawler: Built From Scratch
 
 > An educational project to understand how modern search engines work, focusing on semantic search, web crawling, and vector embeddings.
 
