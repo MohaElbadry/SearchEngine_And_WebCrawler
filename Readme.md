@@ -42,6 +42,19 @@ The system consists of four main components:
 4. Documents are ranked by cosine similarity (semantic relevance)
 5. Results above the similarity threshold are returned to the user
 
+## Example Screenshots
+### Semantic Search Results
+When performing a search query for "geeksblabla", the system returns semantically relevant results with similarity scores, prioritizing the most contextually relevant pages:
+
+![Semantic Search](src/main/resources/search.png)
+### Indexed Documents
+The crawler stores all discovered web pages in Elasticsearch, which can be viewed through the application:
+
+![Document Database](src/main/resources/list.png)
+
+
+
+These screenshots demonstrate the application's ability to crawl multiple pages from the geeksblabla.community website and then perform semantic searches that return relevant results ranked by similarity score.
 
 
 ## Setup & Requirements
